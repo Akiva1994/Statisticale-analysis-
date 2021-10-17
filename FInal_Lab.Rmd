@@ -1,0 +1,268 @@
+---
+title: "final_lab"
+author: '312188881'
+date: "12 7 2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE,include=FALSE}
+library(readxl)
+library(ggplot2)
+library(tidyverse)
+library(dplyr) 
+library(glmnet)
+library(fastDummies)
+library(kableExtra)
+library(tibble)
+library(GGally)
+library(randomForest)
+library(gridExtra)
+```
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE,include=FALSE}
+#reading data
+train_dat<- read_xlsx("train_cases_demographics.xlsx")
+#cleaning data
+train<-train_dat[,-c(1,2)]
+y_dat <- as.vector(train$new_cases/train$population)
+```
+
+
+#Q_1
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+dat_plot <- cbind(train,y_dat)
+ggplot(dat_plot, aes(x=accumulated_vaccination_first_dose,y=y_dat))+
+    geom_point(aes(colour = town_socioeconomic_index))+labs(title = "New cases by two features", subtitle = "Three dimensional plot, with new cases/population as the response\nand two feat.- vaccination and socioeconomic",y = "New_cases/ population",x= "vaccinated with first dose")+theme(plot.title = element_text(hjust = 0.5, size = rel(1.2)),axis.text.x = element_text(angle = 90),plot.subtitle = element_text(hjust = 0.5, size = rel(0.75)),
+        axis.title.y = element_text(angle = 90, size = rel(1),),
+        axis.title.x = element_text(angle = 0,size = rel(1)))+ scale_colour_continuous("socioeconomic_index") 
+####
+```
+
+##In this plot I have chosen to examine the features of first dose vaccination and the socioeconomic_index. We can see that most of the population,for vaccination, are in the values of 0 to 1500. Interesting to see that most points with high values of the response variable are with a low socioeconomic index. In addition we can see the points where the vaccination is close to zero the socioeconomic index is low. 
+
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+#another plot
+ggplot(dat_plot, aes(x=mahoz, y=y_dat)) + 
+  geom_boxplot(fill="slateblue")+labs(title = "Box-plot of New-Cases-Rate by Region", subtitle = "",y = "New_cases/ population",x= "Region")+theme(plot.title = element_text(hjust = 0.5, size = rel(1.2)),axis.text.x = element_text(angle = 90),plot.subtitle = element_text(hjust = 0.5, size = rel(0.75)),
+        axis.title.y = element_text(angle = 90, size = rel(1),),
+        axis.title.x = element_text(angle = 0,size = rel(1)))
+```
+
+##In the plot above we can see that Jerusalem and Judea and Sumeria have the highest cases rate. All the other regions have many large/small values compared to the mean. The standard deviation is high across all regions.
+
+#Q_2.1
+```{r,echo= TRUE,message=FALSE,warning=FALSE}
+ridge <- function(train_x, train_y, lambda){
+  y = train_y
+  x <- as.matrix(train_x)
+  I <- diag(nrow = ncol(x)+1,ncol = ncol(x)+1)
+  intercept <- rep(1, length(y))
+  x <- cbind(intercept, x)
+  beta <- solve((t(x) %*% x) + (lambda * I)) %*% t(x) %*% y
+  return(beta)
+}
+```
+
+#Q_2.2
+```{r,echo= TRUE,message=FALSE,warning=FALSE, fig.height=0.5}
+cv_ridge <- function(x, y, lambda = NA, train_size = 0.7){
+  set.seed(89)
+  inds <- as.numeric(sample(rownames(x_training_set),0.7*length(x_training_set$town_pop_denisty)))
+  train_x <- x[inds,]
+  #train_x <- na.replace(train_x)
+  train_y <- y[inds]
+
+  test_x <- x[-inds,]
+  test_y <- y[-inds]
+  
+  mse_lst <- c()
+  lambda_lst <- c()
+  intercept <- rep(1, length(test_y))
+  test_X <- cbind(intercept, test_x)
+
+  for (i in 1:length(lambda)) {
+    fit <- as.vector(ridge(train_x,train_y,lambda[i]))
+    pred <- fit %*% t(test_X)
+    mse = sqrt(mean((pred - test_y)^2))
+    mse_lst[i] = mse
+    lambda_lst[i] = lambda[i]
+  }
+  model_par <- cbind(mse_lst,lambda_lst)
+  model_par <- model_par[order(model_par[,1],decreasing = T),]
+  model_mse <- model_par[1,1]
+  model_lambda <-model_par[1,2]
+  best_model = ridge(train_x,train_y,model_lambda)
+  
+  return(list(best_model = best_model, model_mse = model_mse, model_lambda = model_lambda))
+}
+#cleaning the data
+temp_train <- as.data.frame(select(train, -"town_eng.y",-"town",-"town_code",-"agas_code", -"new_cases",-"population",-"pop_over50",-"pop_over70"))
+temp_train <- dummy_cols(temp_train, select_columns = c("mahoz"),remove_selected_columns = TRUE)
+temp_train <- as.data.frame(sapply(temp_train, as.numeric))
+temp_train <- na.replace(temp_train)
+x_training_set<- as.data.frame(sapply(temp_train, as.numeric)) #x mat for func
+lambda = seq(.1,100,.1)
+
+optimal_model <- cv_ridge(x_training_set,y_dat,lambda,0.7)
+
+results <- data.frame("model_mse"=optimal_model[["model_mse"]], "model_lambda" =optimal_model[["model_lambda"]])
+rownames(results)<- NULL
+
+kbl(optimal_model[["best_model"]], digits = 10,caption = "Model's coefficients")
+results %>%
+  kbl(caption = "Model's parameters",) %>%
+  kable_material_dark("hover",full_width = T)
+
+```
+#I have chosen to take out some of the features. Such as new_cases and population since they make up the response variable. pop_over70, pop_over50 and pop_over 20 were exhibiting high levels of multicollinearity, so I took out two of them. I also changed the categorical variable "mahoz" to a dummy variable. The results of the optimal model, after cross validation, can be seen in the tables above.
+
+#Q_2.3
+```{r,echo= TRUE ,message=FALSE,warning=FALSE,results = FALSE}
+full_data <- ridge(x_training_set, y_dat,100)
+intercep <- rep(1, length(y_dat))
+full_x_set <- cbind(intercep, x_training_set)
+pred <- t(full_data) %*% t(full_x_set)
+resid <- t(y_dat - pred)
+#correlation
+cor_mat <- as.data.frame(t(cor(resid,full_x_set)))
+cor_mat<-na.omit(cor_mat)
+colnames(cor_mat)<- "Correlation"
+cor_mat <-cor_mat[order(cor_mat$Correlation,decreasing = T),, drop = FALSE]
+
+kbl(cor_mat, digits = 7,caption = "correlation between the residuals and the variables")
+
+```
+#In the table above we can see the correlation between the residuals and the variables. We can see that the absolute highest correlations are with the geographical variables, although not very high. Such as "mahoz" and "East" and "north" coord.   
+
+```{r,echo=TRUE ,message=FALSE,warning=FALSE}
+#Residuals and sd for each region
+resid_mahoz <- cbind(resid,full_x_set)
+resid_mahoz_1 <- resid_mahoz %>%  filter(resid_mahoz$`mahoz_אזור יהודה והשומרון` == 1)
+resid_mahoz_2 <- resid_mahoz %>%  filter(resid_mahoz$mahoz_הדרום == 1) 
+resid_mahoz_3 <- resid_mahoz %>%  filter(resid_mahoz$mahoz_המרכז ==1) 
+resid_mahoz_4 <- resid_mahoz %>%  filter(resid_mahoz$mahoz_הצפון ==1) 
+resid_mahoz_5 <- resid_mahoz %>%  filter(resid_mahoz$mahoz_חיפה == 1) 
+resid_mahoz_6 <- resid_mahoz %>%  filter(resid_mahoz$mahoz_ירושלים ==1) 
+resid_mahoz_7 <- resid_mahoz %>%  filter(resid_mahoz$`mahoz_תל אביב` == 1) 
+#means
+mean_risid_1 <- round(mean(abs(resid_mahoz_1$resid)),6)
+mean_risid_2 <- round(mean(abs(resid_mahoz_2$resid)),6)
+mean_risid_3 <- round(mean(abs(resid_mahoz_3$resid)),6)
+mean_risid_4 <- round(mean(abs(resid_mahoz_4$resid)),6)
+mean_risid_5 <- round(mean(abs(resid_mahoz_5$resid)),6)
+mean_risid_6 <- round(mean(abs(resid_mahoz_6$resid)),6)
+mean_risid_7 <- round(mean(abs(resid_mahoz_7$resid)),6)
+#sd
+sd_risid_1 <- round(sqrt(var(resid_mahoz_1$resid)),6)
+sd_risid_2 <- round(sqrt(var(resid_mahoz_2$resid)),6)
+sd_risid_3 <- round(sqrt(var(resid_mahoz_3$resid)),6)
+sd_risid_4 <- round(sqrt(var(resid_mahoz_4$resid)),6)
+sd_risid_5 <- round(sqrt(var(resid_mahoz_5$resid)),6)
+sd_risid_6 <- round(sqrt(var(resid_mahoz_6$resid)),6)
+sd_risid_7 <- round(sqrt(var(resid_mahoz_7$resid)),6)
+
+resid_dat <- as.data.frame(cbind(mean_risid_1,mean_risid_2,
+      mean_risid_3,mean_risid_4,mean_risid_5,mean_risid_6,mean_risid_7))
+resid_dat <- as.data.frame(t(rbind(resid_dat,c("judea & samaria", "south","center","north","Hifa","Jerusalem","Tel_aviv"),c(sd_risid_1,sd_risid_2,sd_risid_3,sd_risid_4,sd_risid_5,sd_risid_6,sd_risid_7))))
+resid_dat$V3<- as.numeric(resid_dat$V3)
+resid_dat$V1<- as.numeric(resid_dat$V1)
+
+ggplot(resid_dat, aes(x=V2,y=V1)) + geom_bar(stat = "identity",fill="purple")+
+  geom_errorbar(aes(ymin=abs(V1-V3), ymax= abs(V1), width=.2))+
+labs(title = "Mean of Residuals by Region", subtitle = "",y = "Residuals", x = "Region")+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5, size = rel(1.5)),axis.text.x = element_text(angle = 90),
+        plot.subtitle = element_text(hjust = 0.5, size = rel(0.8)),
+        axis.title.y = element_text(angle = 90, size = rel(1),),
+        axis.title.x = element_text(angle = 0,size = rel(0.8)))
+
+```
+
+##In this  plot we can see the mean residuals by each region. we can see that residuals vary quite a lot between the different regions and also with in themselves, ehibiting highest standard deviations.  
+
+```{r,echo=TRUE,message=FALSE,warning=FALSE}
+#Q_2.4
+
+y = y_dat
+x <- as.matrix(full_x_set)
+I <- diag(nrow = ncol(x),ncol = ncol(x))
+w <- x %*% solve((t(x) %*% x) + (100 * I)) %*% t(x) 
+###
+x_agas_1 <- cbind(rownames(train),train) %>% filter(agas_code==1)   
+ind_agas <- as.numeric(x_agas_1$`rownames(train)`)
+w_agas <- w[,c(2,13,16,21,26,31,77,87,94,108,129,147,159,171,175,189,
+193,209,245,453,469,750,848,1113,1117,1121,1160)]
+
+w_sum <- as.data.frame(colSums(abs(w_agas)))
+w_sum$city <- c(2,13,16,21,26,31,77,87,94,108,129,147,159,171,175,189,
+193,209,245,453,469,750,848,1113,1117,1121,1160) 
+#w_sum <-w_sum[order(w_sum$`rowSums(abs(w))`,decreasing = T),, drop = FALSE]
+
+#largest weights 
+w_sum<- w_sum[order(w_sum$`colSums(abs(w_agas))`,decreasing = T),]
+r_name <- w_sum$city[1:5] #top five cities indexes
+
+x_dat_mean <- as.data.frame(colMeans(full_x_set[r_name,]))#mean of the 5 cities
+meancol <- as.data.frame(colMeans(full_x_set))#mean of all cities
+colnames(x_dat_mean) <- "var_mean_5"
+colnames(meancol) <- "var_mean_all"
+join_means <- cbind(round(x_dat_mean,5),round(meancol,5))[2:10,]
+most_influence <- train[r_name,] #
+
+most_influence %>%
+  kbl(caption = "The cities with the most infulence",) %>%
+  kable_material_dark("hover",full_width = T)
+```
+#This chart shows the five cities with the highest weights i.e most influential and their complete data.
+```{r,echo=TRUE,message=FALSE,warning=FALSE}
+join_means %>%
+  kbl(caption = "Model's Featrue means",) %>%
+  kable_material_dark("hover",full_width = T)
+```
+
+#In the table above, we can see the features means of all the data and the features means of only the five most influential cities. We can see that in most of the features they are similar. However in they do have a quite significant lower rate of diabetes and pop_density. Also their agas_socioeconomic_index is also much lower.
+
+
+#Q_3
+#For this section I have chosen to run a random forest model. I have discarded the same variables as before that were part of the response and the variables that were exhibiting high multicollinearity.
+```{r,message=FALSE,warning=FALSE,results='hide'}
+test_feat <- read.csv("test_features.csv",encoding = "UTF-8")#reading test data
+#cleaning the test data to match the training set
+  test_feat_f <- as.data.frame(select(test_feat, -"town_eng.y",-"town",-"town_code",-"agas_code", -"population",-"pop_over50",-"pop_over70",-"X"))
+  
+#converting "mahoz" to dummy variable
+test_feat_f <- dummy_cols(test_feat_f, select_columns = c("mahoz"),remove_selected_columns = TRUE)
+
+test_feat_f <- as.data.frame(sapply(test_feat_f, as.numeric))
+test_feat_f <- na.replace(test_feat_f)
+rf_train_dat <- temp_train[,-(17)]
+#splitting the training set to train and validation for the rmse prediction 
+set.seed(459)
+rf_ind <- sample(rownames(rf_train_dat), 0.7*length(rf_train_dat$town_income))
+rf_train_x <- rf_train_dat[rf_ind,]
+rf_test_x <- rf_train_dat[-as.numeric(rf_ind),]
+rf_train_y <- y_dat[as.numeric(rf_ind)]
+rf_test_y <- y_dat[-as.numeric(rf_ind)]
+#running a random forest model
+rf_model <- randomForest(x = rf_train_x, y =rf_train_y, ntree = 100, do.trace = 1,mtry = 5) 
+rf_pred_train<- predict(rf_model,newdata = rf_test_x,type = 'response')#y_hat of traing
+predict_rmse  <- sqrt(mean((rf_pred_train - rf_test_y)^2))#rmse estimation
+
+predict_y <- predict(rf_model,newdata = test_feat_f,type = 'response')#test prediction
+
+save(predict_y, predict_rmse, file = "312188881.rda")
+
+#true_rmse = Metrics::rmse(actual = true_y, predicted = predict_y)
+
+```
+
+
+
